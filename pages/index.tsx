@@ -3,9 +3,9 @@ import { CodeBlock } from '@/components/CodeBlock';
 import { LanguageSelect } from '@/components/LanguageSelect';
 import { ModelSelect } from '@/components/ModelSelect';
 import { TextBlock } from '@/components/TextBlock';
-import { OpenAIModel, TranslateBody } from '@/types/types';
+import { OpenAIModel, Provider, TranslateBody } from '@/types/types';
 import Head from 'next/head';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 export default function Home() {
   const [inputLanguage, setInputLanguage] = useState<string>('JavaScript');
@@ -16,14 +16,28 @@ export default function Home() {
   const [loading, setLoading] = useState<boolean>(false);
   const [hasTranslated, setHasTranslated] = useState<boolean>(false);
   const [apiKey, setApiKey] = useState<string>('');
+  const [provider, setProvider] = useState<Provider>('openai');
 
-  const handleTranslate = async () => {
-    const maxCodeLength = model === 'gpt-3.5-turbo' ? 6000 : 12000;
-
-    if (!apiKey) {
-      alert('Please enter an API key.');
+  const copyToClipboard = useCallback((text: string) => {
+    if (!text || typeof window === 'undefined') {
       return;
     }
+
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const el = document.createElement('textarea');
+    el.value = text;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+  }, []);
+
+  const handleTranslate = useCallback(async () => {
+    const maxCodeLength = model === 'gpt-3.5-turbo' ? 6000 : 12000;
 
     if (inputLanguage === outputLanguage) {
       alert('Please select different languages.');
@@ -45,14 +59,13 @@ export default function Home() {
     setLoading(true);
     setOutputCode('');
 
-    const controller = new AbortController();
-
     const body: TranslateBody = {
       inputLanguage,
       outputLanguage,
       inputCode,
       model,
       apiKey,
+      provider,
     };
 
     const response = await fetch('/api/translate', {
@@ -60,13 +73,27 @@ export default function Home() {
       headers: {
         'Content-Type': 'application/json',
       },
-      signal: controller.signal,
       body: JSON.stringify(body),
     });
 
     if (!response.ok) {
       setLoading(false);
-      alert('Something went wrong.');
+      const contentType = response.headers.get('content-type');
+      let message = 'Something went wrong.';
+
+      try {
+        if (contentType?.includes('application/json')) {
+          const errorBody = await response.json();
+          message = errorBody?.error || message;
+        } else {
+          const text = await response.text();
+          message = text || message;
+        }
+      } catch (error) {
+        console.error('Failed parsing error response', error);
+      }
+
+      alert(message);
       return;
     }
 
@@ -88,24 +115,25 @@ export default function Home() {
       done = doneReading;
       const chunkValue = decoder.decode(value);
 
-      code += chunkValue;
+      if (chunkValue) {
+        code += chunkValue;
 
-      setOutputCode((prevCode) => prevCode + chunkValue);
+        setOutputCode((prevCode) => prevCode + chunkValue);
+      }
     }
 
     setLoading(false);
     setHasTranslated(true);
     copyToClipboard(code);
-  };
-
-  const copyToClipboard = (text: string) => {
-    const el = document.createElement('textarea');
-    el.value = text;
-    document.body.appendChild(el);
-    el.select();
-    document.execCommand('copy');
-    document.body.removeChild(el);
-  };
+  }, [
+    apiKey,
+    copyToClipboard,
+    inputCode,
+    inputLanguage,
+    model,
+    outputLanguage,
+    provider,
+  ]);
 
   const handleApiKeyChange = (value: string) => {
     setApiKey(value);
@@ -113,17 +141,31 @@ export default function Home() {
     localStorage.setItem('apiKey', value);
   };
 
+  const handleProviderChange = (value: Provider) => {
+    setProvider(value);
+    localStorage.setItem('provider', value);
+    setHasTranslated(false);
+    setOutputCode('');
+  };
+
   useEffect(() => {
-    if (hasTranslated) {
-      handleTranslate();
+    if (!hasTranslated) {
+      return;
     }
-  }, [outputLanguage]);
+
+    handleTranslate();
+  }, [handleTranslate, hasTranslated, outputLanguage]);
 
   useEffect(() => {
     const apiKey = localStorage.getItem('apiKey');
+    const storedProvider = localStorage.getItem('provider');
 
     if (apiKey) {
       setApiKey(apiKey);
+    }
+
+    if (storedProvider === 'openai' || storedProvider === 'bytez') {
+      setProvider(storedProvider);
     }
   }, []);
 
@@ -143,8 +185,24 @@ export default function Home() {
           <div className="text-4xl font-bold">AI Code Translator</div>
         </div>
 
-        <div className="mt-6 text-center text-sm">
-          <APIKeyInput apiKey={apiKey} onChange={handleApiKeyChange} />
+        <div className="mt-6 flex flex-col items-center space-y-2 text-sm">
+          <div className="flex flex-col items-center space-y-2 sm:flex-row sm:space-y-0 sm:space-x-2">
+            <APIKeyInput apiKey={apiKey} onChange={handleApiKeyChange} />
+            <select
+              className="h-[34px] rounded-md bg-[#1F2937] px-3 text-neutral-200"
+              value={provider}
+              onChange={(event) =>
+                handleProviderChange(event.target.value as Provider)
+              }
+            >
+              <option value="openai">OpenAI</option>
+              <option value="bytez">Bytez</option>
+            </select>
+          </div>
+          <div className="text-center text-xs text-neutral-400">
+            Keys are stored locally in your browser. Leave blank to use server
+            environment variables.
+          </div>
         </div>
 
         <div className="mt-2 flex items-center space-x-2">

@@ -6,15 +6,16 @@ import {
   ReconnectInterval,
 } from 'eventsource-parser';
 
+import { Provider } from '@/types/types';
+
 const BYTEZ_MODEL_MAP: Record<string, string> = {
-  'gpt-3.5-turbo': 'Qwen/Qwen2.5-Coder-7B-Instruct',
-  'gpt-4': 'meta-llama/Meta-Llama-3.1-8B-Instruct',
+  'gpt-3.5-turbo':
+    process.env.BYTEZ_MODEL_GPT35 || 'Qwen/Qwen2.5-Coder-7B-Instruct',
+  'gpt-4':
+    process.env.BYTEZ_MODEL_GPT4 || 'meta-llama/Meta-Llama-3.1-8B-Instruct',
 };
 
 const DEFAULT_BYTEZ_MODEL = BYTEZ_MODEL_MAP['gpt-3.5-turbo'];
-
-const isOpenAIKey = (maybeKey?: string) =>
-  typeof maybeKey === 'string' && maybeKey.trim().startsWith('sk-');
 
 const createPrompt = (
   inputLanguage: string,
@@ -108,16 +109,38 @@ const runWithBytez = async (
   const mappedModel = BYTEZ_MODEL_MAP[model] ?? DEFAULT_BYTEZ_MODEL;
   const bytezModel = bytez.model(mappedModel);
 
-  const result = await bytezModel.run(prompt, {
-    max_new_tokens: 1200,
-    temperature: 0.2,
-  });
+  let result: unknown;
 
-  if (result?.error) {
-    throw new Error(result.error);
+  try {
+    result = await bytezModel.run(prompt, {
+      max_new_tokens: 1200,
+      temperature: 0.2,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : JSON.stringify(error);
+    throw new Error(
+      `Bytez request failed. Verify that your API key and model mapping are valid. ${message}`,
+    );
   }
 
-  const output = result?.output;
+  if (
+    !result ||
+    typeof result !== 'object' ||
+    !('error' in result) ||
+    !('output' in result)
+  ) {
+    throw new Error(
+      'Bytez returned an unexpected response. Double-check the model IDs you configured.',
+    );
+  }
+
+  const { error, output } = result as { error: string | null; output: unknown };
+
+  if (error) {
+    throw new Error(error);
+  }
+
   const text =
     typeof output === 'string'
       ? output
@@ -207,23 +230,30 @@ export const OpenAIStream = async (
   inputCode: string,
   model: string,
   key: string,
+  provider?: Provider,
 ) => {
   const prompt = createPrompt(inputLanguage, outputLanguage, inputCode);
   const trimmedKey = key?.trim();
 
-  const hasBytezKey =
-    (!trimmedKey || !isOpenAIKey(trimmedKey)) &&
-    (trimmedKey || process.env.BYTEZ_API_KEY);
+  const resolvedProvider: Provider =
+    provider ||
+    (process.env.BYTEZ_API_KEY && !trimmedKey
+      ? 'bytez'
+      : 'openai');
 
-  if (hasBytezKey) {
-    return runWithBytez(
-      prompt,
-      model,
-      trimmedKey || process.env.BYTEZ_API_KEY || '',
-    );
+  if (resolvedProvider === 'bytez') {
+    const bytezKey = trimmedKey || process.env.BYTEZ_API_KEY;
+    if (!bytezKey) {
+      throw new Error('A Bytez API key is required to run translation.');
+    }
+
+    return runWithBytez(prompt, model, bytezKey);
   }
 
-  const openAIKey = trimmedKey || process.env.OPENAI_API_KEY || '';
+  const openAIKey = trimmedKey || process.env.OPENAI_API_KEY;
+  if (!openAIKey) {
+    throw new Error('An OpenAI API key is required to run translation.');
+  }
 
   return runWithOpenAI(prompt, model, openAIKey);
 };

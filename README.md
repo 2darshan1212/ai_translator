@@ -30,10 +30,11 @@ npm run dev
 
 ## Configuration
 
-- Provide your API key in the UI when prompted. The app supports both:
-  - Bytez API keys (default path). Set `BYTEZ_API_KEY` in `.env.local` to avoid retyping.
-  - OpenAI API keys (`sk-...`). Set `OPENAI_API_KEY` if you prefer the native OpenAI path.
-- When using Bytez, the app maps the existing model picker to Bytez-hosted instruct models for translation.
+- Provide your API key in the UI when prompted and choose its provider (OpenAI or Bytez) from the dropdown.
+  - Bytez keys can also be provided via `BYTEZ_API_KEY` in `.env.local`.
+  - OpenAI keys (`sk-...`) can be provided via `OPENAI_API_KEY` in `.env.local`.
+- Leave the input blank to rely on the server-side environment variables.
+- Optional: override the Bytez models with `BYTEZ_MODEL_GPT35` and `BYTEZ_MODEL_GPT4` if your Bytez account only has access to certain models.                
 - Restart the dev server after changing environment variables.
 
 ## Contact

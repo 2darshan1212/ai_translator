@@ -12,8 +12,14 @@ const handler = async (req: NextApiRequest, res: NextApiResponse) => {
   }
 
   try {
-    const { inputLanguage, outputLanguage, inputCode, model, apiKey } =
-      req.body as TranslateBody;
+    const {
+      inputLanguage,
+      outputLanguage,
+      inputCode,
+      model,
+      apiKey,
+      provider,
+    } = req.body as TranslateBody;
 
     const stream = await OpenAIStream(
       inputLanguage,
@@ -21,6 +27,7 @@ const handler = async (req: NextApiRequest, res: NextApiResponse) => {
       inputCode,
       model,
       apiKey,
+      provider,
     );
 
     res.status(200);
@@ -32,9 +39,21 @@ const handler = async (req: NextApiRequest, res: NextApiResponse) => {
       maybeNodeStream.pipe(res);
       return;
     }
+    const reader = stream.getReader();
 
-    const nodeStream = Readable.fromWeb(stream as ReadableStream<Uint8Array>);
+    const nodeStream = new Readable({
+      async read() {
+        const { value, done } = await reader.read();
+        if (done) {
+          this.push(null);
+        } else {
+          this.push(Buffer.from(value));
+        }
+      }
+    });
+    
     nodeStream.pipe(res);
+    
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Error' });

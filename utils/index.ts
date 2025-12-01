@@ -10,9 +10,9 @@ import { Provider } from '@/types/types';
 
 const BYTEZ_MODEL_MAP: Record<string, string> = {
   'gpt-3.5-turbo':
-    process.env.BYTEZ_MODEL_GPT35 || 'Qwen/Qwen2.5-Coder-7B-Instruct',
+    process.env.BYTEZ_MODEL_GPT35 || 'openai-community/gpt2',
   'gpt-4':
-    process.env.BYTEZ_MODEL_GPT4 || 'meta-llama/Meta-Llama-3.1-8B-Instruct',
+    process.env.BYTEZ_MODEL_GPT4 || 'openai-community/gpt2',
 };
 
 const DEFAULT_BYTEZ_MODEL = BYTEZ_MODEL_MAP['gpt-3.5-turbo'];
@@ -153,6 +153,85 @@ const runWithBytez = async (
   return streamFromString(text);
 };
 
+const GROQ_MODEL_MAP: Record<string, string> = {
+  'gpt-3.5-turbo': process.env.GROQ_MODEL_GPT35 || 'llama-3.1-8b-instant',
+  'gpt-4': process.env.GROQ_MODEL_GPT4 || 'llama-3.3-70b-versatile',
+};
+
+const runWithGroq = async (
+  prompt: string,
+  model: string,
+  apiKey: string,
+) => {
+  if (!apiKey) {
+    throw new Error('A Groq API key is required to run translation.');
+  }
+
+  const groqModel = GROQ_MODEL_MAP[model] || 'llama-3.1-8b-instant';
+  const system = { role: 'system', content: prompt };
+
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    method: 'POST',
+    body: JSON.stringify({
+      model: groqModel,
+      messages: [system],
+      temperature: 0,
+      stream: true,
+    }),
+  });
+
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  if (res.status !== 200) {
+    const statusText = res.statusText;
+    const result = await res.body?.getReader().read();
+    throw new Error(
+      `Groq API returned an error: ${
+        decoder.decode(result?.value) || statusText
+      }`,
+    );
+  }
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const onParse = (event: ParsedEvent | ReconnectInterval) => {
+        if (event.type === 'event') {
+          const data = event.data;
+
+          if (data === '[DONE]') {
+            controller.close();
+            return;
+          }
+
+          try {
+            const json = JSON.parse(data);
+            const text = json.choices[0]?.delta?.content;
+            if (text) {
+              const queue = encoder.encode(text);
+              controller.enqueue(queue);
+            }
+          } catch (e) {
+            controller.error(e);
+          }
+        }
+      };
+
+      const parser = createParser(onParse);
+
+      for await (const chunk of res.body as any) {
+        parser.feed(decoder.decode(chunk));
+      }
+    },
+  });
+
+  return stream;
+};
+
 const runWithOpenAI = async (
   prompt: string,
   model: string,
@@ -235,11 +314,23 @@ export const OpenAIStream = async (
   const prompt = createPrompt(inputLanguage, outputLanguage, inputCode);
   const trimmedKey = key?.trim();
 
+  // Default to Groq if GROQ_API_KEY is set, otherwise check for other providers
   const resolvedProvider: Provider =
     provider ||
-    (process.env.BYTEZ_API_KEY && !trimmedKey
+    (process.env.GROQ_API_KEY && !trimmedKey
+      ? 'groq'
+      : process.env.BYTEZ_API_KEY && !trimmedKey
       ? 'bytez'
       : 'openai');
+
+  if (resolvedProvider === 'groq') {
+    const groqKey = trimmedKey || process.env.GROQ_API_KEY;
+    if (!groqKey) {
+      throw new Error('A Groq API key is required to run translation.');
+    }
+
+    return runWithGroq(prompt, model, groqKey);
+  }
 
   if (resolvedProvider === 'bytez') {
     const bytezKey = trimmedKey || process.env.BYTEZ_API_KEY;

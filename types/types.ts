@@ -1,5 +1,5 @@
 export type OpenAIModel = 'gpt-3.5-turbo' | 'gpt-4';
-export type Provider = 'openai' | 'bytez';
+export type Provider = 'openai' | 'bytez' | 'groq';
 
 export interface TranslateBody {
   inputLanguage: string;

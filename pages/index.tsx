@@ -16,7 +16,7 @@ export default function Home() {
   const [loading, setLoading] = useState<boolean>(false);
   const [hasTranslated, setHasTranslated] = useState<boolean>(false);
   const [apiKey, setApiKey] = useState<string>('');
-  const [provider, setProvider] = useState<Provider>('openai');
+  const [provider, setProvider] = useState<Provider>('groq');
 
   const copyToClipboard = useCallback((text: string) => {
     if (!text || typeof window === 'undefined') {
@@ -164,7 +164,7 @@ export default function Home() {
       setApiKey(apiKey);
     }
 
-    if (storedProvider === 'openai' || storedProvider === 'bytez') {
+    if (storedProvider === 'openai' || storedProvider === 'bytez' || storedProvider === 'groq') {
       setProvider(storedProvider);
     }
   }, []);
@@ -195,6 +195,7 @@ export default function Home() {
                 handleProviderChange(event.target.value as Provider)
               }
             >
+              <option value="groq">Groq (Free)</option>
               <option value="openai">OpenAI</option>
               <option value="bytez">Bytez</option>
             </select>
